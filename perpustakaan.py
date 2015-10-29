@@ -7,6 +7,7 @@ import hashlib
 import traceback
 import sys
 import os
+import message
 
 
 class LoginResource:
@@ -520,3 +521,4 @@ aplikasi.add_route("/perpustakaan/deletebuku", DeleteBuku())
 aplikasi.add_route("/perpustakaan/pinjambuku", PinjamBuku())
 aplikasi.add_route("/perpustakaan/listpeminjaman", ListPeminjaman())
 aplikasi.add_route("/perpustakaan/pengembalianbuku", PengembalianBuku())
+aplikasi.add_route("/perpustakaan/indexpesan", message.Index())
