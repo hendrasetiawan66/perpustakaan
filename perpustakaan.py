@@ -3,58 +3,115 @@ import json
 import MySQLdb
 from datetime import datetime, timedelta
 import uuid
+import hashlib
+import traceback
 import sys
+import os
 
 
-class Login:
-        def on_post(self, req, resp):
-            db = MySQLdb.connect(host='localhost', user='root',
-                             passwd='Aks4ra', db='perpustakaan')
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
+class LoginResource:
+    #import MySQLdb
+    def on_post(self, req, resp):
+      try:
+        db = MySQLdb.connect(host='localhost', user='root', passwd='root', db='perpustakaan')
+        raw_json = req.stream.read()
+        result_json = json.loads(raw_json, encoding='utf-8')
+        # daftar variable yang dibutuhkan
+        client_id = result_json["client_id"]
+        device_id = result_json["device_id"]
+        secret_id = result_json["client_secret"]
+        username = result_json["username"]
+        password = result_json["password"]
+        # validation
+        if not req.client_accepts_json:
+            return return_json(resp, 400, "Data wajib valid json")
 
-            raw_json = req.stream.read()
+        data_list = ["client_id", "client_secret", "username", "password", "device_id"]
+        for nama in data_list:
+            if not result_json.has_key(nama):
+        	   return return_json(resp, 400, "Data %s wajib ada" % nama)
 
-            param = json.loads(raw_json, encoding='utf-8')
+        # cek valid client id
+        sekret = API_SECRET[client_id]
+        if secret_id != sekret:
+            return return_json(resp, 401, "Data secret_id tidak terdaftar")
+        ooo = "select users.* from users where username = '%s'" % username
+        cursor = db.cursor()
+        cursor.execute(ooo)
+        rows = cursor.fetchone()
+        if not rows:
+            return return_json(resp, 404, "You don't have account yet")
 
-            usr = param.get('username')
+        padd = password
+        if rows[2] != padd: #cek password apa sudah sama
+            return return_json(resp, 400, "Password Not Match")
 
-            pwd = param.get('password')
+        user_id = int(rows[0])
+        cursor.close()
+        return proses_login(resp, user_id, device_id, client_id)
+      except Exception as e:
+        if IS_DEV:
+            ex_type, ex, tb = sys.exc_info()
+            traceback.print_tb(tb)
+      	#di masukan ke sistem loging
+        return return_json(resp, 500, str(e))
 
-            if usr is not None and usr != "" and pwd is not None and pwd != "":
-                 sqlCek = """
-                    SELECT * FROM `user` WHERE username=%s AND password=%s
-                 """
 
-                 cursor.execute(sqlCek, (usr, pwd))
+def proses_login(resp, user_id, device_id, client_id):
+        db = MySQLdb.connect(host='localhost', user='root', passwd='root', db='perpustakaan')
+        cursor = db.cursor()
+        new_token = hashlib.sha1(os.urandom(128)).hexdigest()
+        waktu = datetime.now()
+        update = waktu + timedelta(weeks=1)
+        update = update.date()
+        sql = """
+            insert into oauth_access_tokens(oauth_token, client_id,
+                user_id, expires, created, modified, expired, device_id)
+            values(%s, %s, %s, 0, %s, %s, %s, "%s")
+            """
+        sql0 = """
+             delete from oauth_access_tokens where user_id=%s;
+            """ % int(user_id)
+        cursor.execute(sql0)
+        cursor.execute(sql, (new_token, client_id, int(user_id), waktu,
+            waktu, update, device_id))
+        sql2 = "update users set users.last_login=%s where users.id=%s"
+        cursor.execute(sql2, (waktu, user_id))
+        db.commit() #save db
+        cursor.close()
+        data = {
+            "meta": {
+                "code": 200,
+                "confirm": "success"
+               },
+            "data": {
+               "access_token": new_token,
+               "created": str(waktu),
+               "expired": str(update),
+               "device_id": device_id,
+               "os_version": None,
+               "registration_id": None,
+               "app_version": None
+            }
+        }
+        resp.status = falcon.HTTP_200
+        resp.body = json.dumps(data , ensure_ascii=False).encode('utf-8')
 
-                 ada = cursor.fetchone()
 
-                 if ada != "" and ada is not None:
-                     genToken = str(uuid.uuid4())
+def return_json(resp, code, message):
+        data = {"meta":{"code":code}}
+        data["meta"]["error_message"] = message
+        resp.body = json.dumps(data)
+        resp.status = falcon.HTTP_200
+        return resp
 
-                     if genToken != "" and genToken is not None:
-                         db = MySQLdb.connect(host='localhost', user='root',
-                                          passwd='Aks4ra', db='perpustakaan')
-                         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-                         sqlUpdateToken = """
-                            UPDATE `user` SET `token`=%s,`exp`=%s WHERE id=%s
-                         """
+API_SECRET = {
+        'clientidhendra' : 'secretidhendra'
+}
 
-                         expDate = datetime.now() + timedelta(days=1)
 
-                         cursor.execute(sqlUpdateToken, (genToken, expDate, ada['id']))
-
-                         db.commit()
-
-                     ret = {"confirm": "login is succesfull", "data": genToken}
-
-                 else:
-                     ret = {"confirm": "Try again!"}
-
-                 resp.body = json.dumps(ret)
-
-                 print usr, pwd
+IS_DEV = True
 
 
 class Buku:
@@ -378,7 +435,7 @@ class ListPeminjaman:
                     JOIN user ON (pinjam.user_id = user.id)
                     JOIN buku ON (pinjam.buku_id = buku.id)
                     WHERE user.token=%s
-                """                
+                """
 
                 cursor.execute(sql_list, (token,))
 
@@ -455,7 +512,7 @@ class PengembalianBuku:
 
 aplikasi = falcon.API()
 
-aplikasi.add_route("/perpustakaan/login", Login())
+aplikasi.add_route("/perpustakaan/login", LoginResource())
 aplikasi.add_route("/perpustakaan/buku", Buku())
 aplikasi.add_route("/perpustakaan/insertbuku", InsertBuku())
 aplikasi.add_route("/perpustakaan/updatebuku", UpdateBuku())
