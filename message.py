@@ -316,6 +316,131 @@ class Delete:
                 return return_json(resp, 500, "Server sedang dalam proses maintenance. Mohon maaf atas ketidaknyamanannya.")
 
 
+class Detail:
+    def on_get(self, req, resp):
+      try:
+        # konfigurasi database
+        db = MySQLdb.connect(host='localhost', user='root', passwd='root', db='perpustakaan')
+        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+        # daftar variable yang dibutuhkan dan respon jika variable-nya kosong
+        list_parameter = [
+            {"index": "access_token", "message": "Unauthorized access_token"},
+            {"index": "sender_id", "message": "Sender_id is required"}
+        ]
+        data = {}
+
+        for par in list_parameter:
+            if req.get_param(par['index']) is None or req.get_param(par['index']) == "":
+                return return_json(resp, 401, req.get_param(par['message']))
+            else:
+                data[req.get_param(par['index'])] = str(req.get_param(par['index']))
+
+        sql_get_user_id = """
+            SELECT * FROM oauth_access_tokens WHERE oauth_token=%s
+        """
+        cursor.execute(sql_get_user_id, (req.get_param('access_token'),))
+        rows = cursor.fetchone()
+
+        if rows is not None and rows != "":
+            user_id = int(rows['user_id'])
+        else:
+            return return_json(resp, 401, "token is not found")
+
+        sql_count = """
+                SELECT count(*) as total
+                FROM messages
+                where (sender_id=%s and recipient_id=%s) or (sender_id=%s and recipient_id=%s)
+                order by id DESC;
+            """ %  (req.get_param('sender_id'), user_id, user_id, req.get_param('sender_id'))
+
+        cursor.execute(sql_count)
+        row_count = cursor.fetchone()
+        total_data = int(row_count['total'])
+
+        #print row_count[0][0]
+        if total_data > 0:
+            output = {
+                "meta": {
+                    "code": 200,
+                    "confirm": "success"
+                },
+                "data": {}
+            }
+        else:
+           return return_json(resp, 404, "Pesan tidak ditemukan")
+
+        query_m = """
+                 SELECT messages.*,
+                 send.id as send_id,send.username as sender_name, send.username as send_username,
+                 rec.id as rec_id,rec.username as rec_name, rec.username as rec_username
+                 FROM messages
+                 left join users as send on send.id=sender_id
+                 left join users as rec on rec.id=recipient_id
+                 where (sender_id=%s and recipient_id=%s) or (sender_id=%s and recipient_id=%s) order by id DESC;
+            """ %  (req.get_param('sender_id'), user_id, user_id, req.get_param('sender_id'))
+
+        cursor.execute(query_m)
+        rows = cursor.fetchall()
+
+        output["data"] = []
+
+        rows = list(rows)
+
+        rows.reverse()
+
+        pprint.pprint(rows)
+
+        for data_tt in rows:
+            data_dict = None
+            data_recipient = int(data_tt['rec_id'])
+
+            data_created = str(data_tt['created'])
+            data_modified = str(data_tt['modified'])
+
+            waktu = data_tt['created']
+            data_dict = {"Message": {
+                    "id": str(data_tt['id']),
+                    "parent_id":data_tt['parent_id'],
+                    "sender_id": str(data_tt['send_id']),
+                    "recipient_id": str(data_tt['rec_id']),
+                    "message": data_tt['message'],
+                    "is_read": str(data_tt['is_read']),
+                    "created": data_created,
+                    "modified": data_modified
+                },
+                "Sender": {
+                    "id": str(data_tt['send_id']),
+                    "name": data_tt['sender_name'],
+                    "username": str(data_tt['send_username'])
+                },
+                "Recipient": {
+                    "id": str(data_tt['rec_id']),
+                    "name": data_tt['rec_name'],
+                    "username": str(data_tt['rec_username'])
+                },
+
+            }
+
+            output["data"].append(data_dict)
+
+        cursor.close()
+        try:
+            data_resp = json.dumps(output, ensure_ascii=False).encode('utf-8')
+        except:
+            data_resp = json.dumps(output)
+
+        resp.status = falcon.HTTP_200
+        resp.body = data_resp
+
+      except Exception as e:
+        if IS_DEV:
+            ex_type, ex, tb = sys.exc_info()
+            traceback.print_tb(tb)
+            return return_json(resp, 500, str(e))
+        else:
+            return return_json(resp, 500, "Server sedang dalam proses maintenance. Mohon maaf atas ketidaknyamanannya.")
+
+
 def return_json(resp, code, message):
         data = {"meta":{"code":code}}
         data["meta"]["error_message"] = message
