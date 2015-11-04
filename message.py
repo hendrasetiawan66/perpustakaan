@@ -441,6 +441,77 @@ class Detail:
             return return_json(resp, 500, "Server sedang dalam proses maintenance. Mohon maaf atas ketidaknyamanannya.")
 
 
+class MarkRead:
+    def on_post(self, req, resp):
+        try:
+            # konfigurasi database
+            db = MySQLdb.connect(host='localhost', user='root', passwd='root', db='perpustakaan')
+            cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+            raw_json = req.stream.read()
+            param = json.loads(raw_json, encoding='utf-8')
+            # daftar variable yang dibutuhkan dan respon jika variable-nya kosong
+            list_parameter = [
+                                {'index': 'access_token', 'message': 'Unauthorized access_token'},
+                                {'index': 'message_ids', 'message': 'message index is required'}
+                            ]
+
+            data = {}
+
+            for daftar in list_parameter:
+                if daftar['index'] in param:
+                    if param[daftar['index']] == "":
+                        return return_json(resp, 401, daftar['message'])
+                    else:
+                        data[daftar['index']] = param.get(daftar['index'])
+                else:
+                    return return_json(resp, 401, daftar['message'])
+
+            sql_get_user_id = """
+                SELECT * FROM oauth_access_tokens WHERE oauth_token=%s
+            """
+            cursor.execute(sql_get_user_id, (param['access_token'],))
+            rows = cursor.fetchone()
+
+            if rows is not None and rows != "":
+                user_id = int(rows['user_id'])
+            else:
+                return return_json(resp, 401, "token is not found")
+
+            waktu = datetime.now()
+
+            if isinstance(data['message_ids'], str) or isinstance(data['message_ids'], unicode):
+                arrMessageIds = json.loads(data['message_ids'], encoding='utf-8')
+            else:
+                arrMessageIds = data['message_ids']
+
+            for MessageId in arrMessageIds:
+                sql_update = "UPDATE `messages` SET `is_read`=%s, `modified`=%s WHERE `id`=%s"
+                cursor.execute(sql_update, (1, waktu, MessageId))
+
+            db.commit()
+
+            output = {
+                "meta": {
+                    "code": 200,
+                    "confirm": "success"
+                },
+                "data": "mark read success"
+            }
+
+            data_resp = json.dumps(output, encoding='utf-8', ensure_ascii=False)
+            resp.status = falcon.HTTP_200
+            resp.body = data_resp
+
+        except Exception as e:
+            if IS_DEV:
+                ex_type, ex, tb = sys.exc_info()
+                traceback.print_tb(tb)
+                return return_json(resp, 500, str(e))
+            else:
+                return return_json(resp, 500, "Server sedang dalam proses maintenance. Mohon maaf atas ketidaknyamanannya.")
+
+
 def return_json(resp, code, message):
         data = {"meta":{"code":code}}
         data["meta"]["error_message"] = message
